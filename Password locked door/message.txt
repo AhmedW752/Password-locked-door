@@ -1,0 +1,172 @@
+#include<avr/io.h>
+#include<util/delay.h>
+#include<string.h>
+#include "keypad.h"
+unsigned char TR_Counter=0;
+unsigned char state= closed;
+unsigned char KeyPad_getPrKey(void)
+{
+	unsigned char col,row;
+	while(1)
+	{
+		for(col=0;col<N_col;col++) /* loop for columns */
+		{
+			/* 		each time only one of the column pins will be output and
+			  	  	  the rest will be input pins including the row pins
+			 */
+			DDRC = (0b00010000<<col); //00010000
+			/*		  clear the output pin column in this trace and enable the internal
+	 	 	 	 	 pull up resistors for the rows pins
+			*/
+			PORTC = (~(0b00010000<<col)); //11101111
+
+			for(row=0;row<N_row;row++) /* loop for rows */
+			{
+				if(!(PINC & (1<<row))) /* if the switch is press in this row */
+				{
+						return KeyPad_4x3_adjustKeyNumber((row*N_col)+col+1); // returning value of pressed key
+				}
+			}
+		}
+	}
+}
+
+static unsigned char KeyPad_4x3_adjustKeyNumber(unsigned char button_number) // function for symbols in lower keypad buttons
+{
+	switch(button_number)
+	{
+		case 10: return '*';
+				 break;
+		case 11: return 0;
+				 break;
+		case 12: return '#';
+				 break;
+		default: return button_number;
+	}
+}
+
+void str_cmp(char pwd[])
+{
+    char PASS[] = "752759"; /* SAVED PIN*/
+        if (strcmp(PASS,pwd) == 0)
+        {
+        							/* CASE CORRECT PIN*/
+        	_delay_ms(1000);
+        	LCD_sendCommand(CLEAR_COMMAND);
+        	 display_pwd("ACCESS GRANTED");
+        	// LCD_displayCharacter(128275);
+        	 SET_BIT(PORTD,7);
+        	 SET_BIT(PORTC,7);
+        	  /* puts 1 on PIN1 in PORTB for motor to operate and green LED */
+        	 _delay_ms(10000);/* wait until door is opened*/
+        	//PORTB&=(0X00); /* Motor stops to stop the door*/
+        	state=opened;
+
+        }
+        else
+        {							/* CASE INCORRECT PIN*/
+        	_delay_ms(1000);
+        	LCD_sendCommand(CLEAR_COMMAND);
+        	display_pwd("ACCESS DENIED");
+        	SET_BIT(PORTD,3);
+        	SET_BIT(PORTA,3);
+        	_delay_ms(1000);
+        }
+
+
+
+}
+
+void LCD_sendCommand(unsigned char command)
+{
+	CLEAR_BIT(LCD_CTRL_PORT,RS); /* Instruction Mode RS=0 */
+	CLEAR_BIT(LCD_CTRL_PORT,RW); /* write data to LCD so RW=0 */
+	LCD_DATA_PORT = command; /* out the required command to the data bus D0 --> D7 */
+	_delay_ms(1); /* delay for processing*/
+	SET_BIT(LCD_CTRL_PORT,E); /* Enable LCD E=1 */
+	_delay_ms(1); /* delay for processing*/
+	CLEAR_BIT(LCD_CTRL_PORT,E); /* disable LCD E=0 */
+	_delay_ms(1); /* delay for processing*/
+}
+void LCD_init(void)
+{
+	LCD_DATA_PORT_DIR = 0xFF; /* Configure the data port as output port */
+	LCD_CTRL_PORT_DIR |= (1<<E) | (1<<RS) | (1<<RW); /* Configure the control pins(E,RS,RW) as output pins */
+	LCD_sendCommand(TWO_LINE_LCD_Eight_BIT_MODE); /* use 2-line LCD + 8-bit Data Mode + 5*7 dot display Mode */
+	LCD_sendCommand(HOME); /* cursor stay at first row and column to start typing*/
+	LCD_sendCommand(CURSOR_OFF); /* Turn off cursor*/
+	LCD_sendCommand(CLEAR_COMMAND); /* clear LCD at the beginning */
+}
+
+void LCD_displayCharacter(unsigned char data)
+{
+	SET_BIT(LCD_CTRL_PORT,RS); /* Data Mode : RS=1 */
+	CLEAR_BIT(LCD_CTRL_PORT,RW); /* write data to LCD so RW=0 */
+	SET_BIT(LCD_CTRL_PORT,E); /* Enable LCD E=1 */
+	_delay_ms(1); /* delay for processing */
+	PORTD = data; /* out the required data char to the data bus D0 --> D7 */
+	_delay_ms(1); /* delay for processing*/
+	SET_BIT(LCD_CTRL_PORT,E); /* Enable LCD E=1 */
+	_delay_ms(1); /* delay for processing*/
+	CLEAR_BIT(LCD_CTRL_PORT,E); /* disable LCD E=0 */
+	_delay_ms(1); /* delay for processing */
+}
+
+void display_pwd(char Str[])
+{
+	unsigned char i = 0;
+	while(Str[i] != '\0')
+	{
+		LCD_displayCharacter(Str[i]); /*Displays string of charachters using charachter display function*/
+		i++;
+	}
+}
+
+int main(void)
+{
+	SET_BIT(DDRD,7); /* Initializing last pin in PORTD to be o/p*/
+	int x;
+   char Pin[6]; /* Array to save entered pin*/
+    LCD_init(); /* Initialzing LCD settings as desired*/
+    	while(1)
+    {
+    	if(state== closed)
+    	{
+    		if(TR_Counter<3)
+    		{
+    	LCD_sendCommand(CLEAR_COMMAND);
+    	display_pwd("PIN CODE\n");
+    		for(x=0;x<6;x++) /* 6 is the no of allowed Enteries for the pin*/
+    		{
+    			Pin[x]=KeyPad_getPrKey()+48; /* fills the array with charachters from the keypad */
+    			while((!(PINA & (1<<0)))|(!(PINA & (1<<1)))|(!(PINA & (1<<2)))|(!(PINA & (1<<3)))) // SHADY's
+    			{
+    				/* open loop to keep the processor waiting until pressed button is released*/
+    			}
+    			LCD_displayCharacter(Pin[x]); /* Display Entered pin on LCD*/
+    		}
+
+    			str_cmp(Pin); /* Compared Entered pin with saved one to check*/
+    	}
+    	else 	{
+    		PORTB|=(1<<7);
+    			}
+    	}
+    	else /* state is opened*/
+    	{
+    		LCD_sendCommand(CLEAR_COMMAND);
+    		display_pwd("WELCOME BOSS");
+    		while(!(PINC&(1<<0)))
+    		{
+    			/* open loop to keep the processor waiting until pressing button to lock the door*/
+    		}
+    		state=closed;
+    		LCD_sendCommand(CLEAR_COMMAND);
+    		display_pwd("CLOSING");
+    		SET_BIT(PORTC,1);
+    		CLEAR_BIT(PORTB,0);
+    		_delay_ms(10000);
+
+    	}
+    }
+}
